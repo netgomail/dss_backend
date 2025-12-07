@@ -10,10 +10,10 @@ IS_SANDBOX = True
 
 # массив анализируемых инструментов, которые содержатся в индексе Московской биржи (IMOEX) generate_instruments.py
 INSTRUMENTS = [
-    { "name": "AFKS", "alias": "АФК Система", "figi": "BBG004S68614", "full_name": "АФК Система", "class_code": "TQBR" },
+    # { "name": "AFKS", "alias": "АФК Система", "figi": "BBG004S68614", "full_name": "АФК Система", "class_code": "TQBR" },
     # { "name": "AFLT", "alias": "Аэрофлот", "figi": "BBG004S683W7", "full_name": "Аэрофлот", "class_code": "TQBR" },
     # { "name": "ALRS", "alias": "АЛРОСА", "figi": "BBG004S68B31", "full_name": "АЛРОСА", "class_code": "TQBR" },
-    # { "name": "ASTR", "alias": "Группа Астра", "figi": "RU000A106T36", "full_name": "Группа Астра", "class_code": "TQBR" },
+    { "name": "ASTR", "alias": "Группа Астра", "figi": "RU000A106T36", "full_name": "Группа Астра", "class_code": "TQBR" },
     # { "name": "BSPB", "alias": "Банк Санкт-Петербург", "figi": "BBG000QJW156", "full_name": "Банк Санкт-Петербург", "class_code": "TQBR" },
     # { "name": "CBOM", "alias": "МКБ", "figi": "BBG009GSYN76", "full_name": "МКБ", "class_code": "TQBR" },
     # { "name": "CHMF", "alias": "Северсталь", "figi": "BBG00475K6C3", "full_name": "Северсталь", "class_code": "TQBR" },

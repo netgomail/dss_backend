@@ -1,15 +1,14 @@
 import os
-import asyncio
-from pathlib import Path
+import time
 import sys
+from pathlib import Path
 import pandas as pd
 import pandas_ta as ta
 import numpy as np
-from datetime import datetime, timedelta
-from tqdm.asyncio import tqdm
+from datetime import timedelta
 from grpc import StatusCode, RpcError
 
-from tinkoff.invest import AsyncClient, CandleInterval
+from tinkoff.invest import Client, CandleInterval
 from tinkoff.invest.utils import now
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -22,17 +21,14 @@ import settings
 # === КОНФИГУРАЦИЯ ===
 
 TIMEFRAMES = {
-    "M1":  {"interval": CandleInterval.CANDLE_INTERVAL_1_MIN,  "days_back": 10},
-    "M2":  {"interval": CandleInterval.CANDLE_INTERVAL_5_MIN,  "days_back": 30},
-    "M3":  {"interval": CandleInterval.CANDLE_INTERVAL_5_MIN,  "days_back": 30},
     "M5":  {"interval": CandleInterval.CANDLE_INTERVAL_5_MIN,  "days_back": 30},
     "M15": {"interval": CandleInterval.CANDLE_INTERVAL_15_MIN, "days_back": 60},
+    "M30": {"interval": CandleInterval.CANDLE_INTERVAL_30_MIN, "days_back": 120},
     "H1":  {"interval": CandleInterval.CANDLE_INTERVAL_HOUR,   "days_back": 365},
     "H2":  {"interval": CandleInterval.CANDLE_INTERVAL_2_HOUR, "days_back": 730},
     "H4":  {"interval": CandleInterval.CANDLE_INTERVAL_4_HOUR, "days_back": 730},
     "D1":  {"interval": CandleInterval.CANDLE_INTERVAL_DAY,    "days_back": 3650},
     "Week": {"interval": CandleInterval.CANDLE_INTERVAL_WEEK,   "days_back": 3650},
-    "Month": {"interval": CandleInterval.CANDLE_INTERVAL_MONTH, "days_back": 3650},
 }
 
 DATA_DIR = "data/tickers"
@@ -62,7 +58,8 @@ def calculate_indicators(df):
         df["ema10"] = ta.ema(df["close"], length=10)
         df["ema20"] = ta.ema(df["close"], length=20)
         df["ema50"] = ta.ema(df["close"], length=50)
-        df["ema200"] = ta.ema(df["close"], length=200)
+        if len(df) >= 200:
+            df["ema200"] = ta.ema(df["close"], length=200)
 
         # MACD
         macd = ta.macd(df["close"])
@@ -105,6 +102,36 @@ def calculate_indicators(df):
         # Защита от деления на ноль для vol_rel
         df["vol_rel"] = np.where(df["vol_sma20"] > 0, df["volume"] / df["vol_sma20"], 1)
 
+        # 5. Свечные паттерны
+        try:
+            # Doji
+            if hasattr(ta, "cdl_doji"):
+                df["pat_doji"] = ta.cdl_doji(df["open"], df["high"], df["low"], df["close"]) / 100
+            else:
+                 df["pat_doji"] = 0
+
+            # Hammer
+            if hasattr(ta, "cdl_hammer"):
+                df["pat_hammer"] = ta.cdl_hammer(df["open"], df["high"], df["low"], df["close"]) / 100
+            else:
+                 df["pat_hammer"] = 0
+            
+            # Engulfing
+            if hasattr(ta, "cdl_engulfing"):
+                df["pat_engulfing"] = ta.cdl_engulfing(df["open"], df["high"], df["low"], df["close"]) / 100
+            else:
+                 df["pat_engulfing"] = 0
+                 
+            df["pat_doji"] = df["pat_doji"].fillna(0)
+            df["pat_hammer"] = df["pat_hammer"].fillna(0)
+            df["pat_engulfing"] = df["pat_engulfing"].fillna(0)
+
+        except Exception as e:
+            # print(f"Warning: Candle patterns calculation failed: {e}")
+            df["pat_doji"] = 0
+            df["pat_hammer"] = 0
+            df["pat_engulfing"] = 0
+
         # --- РЕЖИМЫ ---
         df["atr_sma50"] = ta.sma(df["atr"], length=50)
         
@@ -138,9 +165,9 @@ def clean_dataframe(df):
     df = df.sort_index()
     return df
 
-async def get_candles_with_retry(client, figi, from_, interval, max_retries=5):
+def get_candles_with_retry(client, figi, from_, interval, max_retries=5):
     """
-    Обертка с повторными попытками при ошибке RESOURCE_EXHAUSTED
+    Обертка с повторными попытками при ошибке RESOURCE_EXHAUSTED (Синхронная версия)
     """
     attempt = 0
     base_delay = 5 # секунд
@@ -148,7 +175,8 @@ async def get_candles_with_retry(client, figi, from_, interval, max_retries=5):
     while attempt < max_retries:
         try:
             candles = []
-            async for candle in client.get_all_candles(figi=figi, from_=from_, interval=interval):
+            # Используем синхронный генератор
+            for candle in client.get_all_candles(figi=figi, from_=from_, interval=interval):
                 candles.append({
                     "time": candle.time,
                     "open": cast_money(candle.open),
@@ -162,8 +190,8 @@ async def get_candles_with_retry(client, figi, from_, interval, max_retries=5):
             if e.code() == StatusCode.RESOURCE_EXHAUSTED:
                 attempt += 1
                 wait_time = base_delay * attempt + np.random.uniform(0, 1) # Экспоненциальная задержка + джиттер
-                # print(f"⏳ Лимит запросов (429/Exhausted). Ждем {wait_time:.1f} сек... (Попытка {attempt}/{max_retries})")
-                await asyncio.sleep(wait_time)
+                print(f"⏳ Лимит запросов (429/Exhausted) для {figi}. Ждем {wait_time:.1f} сек... (Попытка {attempt}/{max_retries})")
+                time.sleep(wait_time)
             else:
                 # Если ошибка другая (не лимиты), пробрасываем её
                 print(f"❌ Критическая ошибка API: {e}")
@@ -175,62 +203,82 @@ async def get_candles_with_retry(client, figi, from_, interval, max_retries=5):
     print(f"❌ Не удалось получить данные после {max_retries} попыток.")
     return []
 
-async def process_instrument(client, instrument, sem):
+def process_instrument(client, instrument):
     ticker = instrument["name"]
     figi = instrument["figi"]
     ticker_dir = os.path.join(DATA_DIR, ticker)
     os.makedirs(ticker_dir, exist_ok=True)
 
-    async with sem:
-        for tf_name, tf_params in TIMEFRAMES.items():
-            # == RATE LIMITER == 
-            # Небольшая пауза перед каждым запросом внутри таска, чтобы сгладить пики
-            await asyncio.sleep(0.5) 
-            
-            _from = now() - timedelta(days=tf_params["days_back"])
-            
-            # Используем безопасную функцию загрузки
-            candles = await get_candles_with_retry(client, figi, _from, tf_params["interval"])
+    for tf_name, tf_params in TIMEFRAMES.items():
+        # == RATE LIMITER == 
+        # Небольшая пауза перед каждым запросом, чтобы сгладить пики
+        print(f"⬇️ {ticker} | {tf_name} loading...")
+        time.sleep(0.5) # Увеличили паузу для надежности
+        
+        _from = now() - timedelta(days=tf_params["days_back"])
+        
+        # Используем безопасную функцию загрузки
+        candles = get_candles_with_retry(client, figi, _from, tf_params["interval"])
 
-            if not candles:
-                continue
+        if not candles:
+            print(f"⚠️ {ticker} | {tf_name}: Нет данных")
+            continue
 
-            df = pd.DataFrame(candles)
-            df = df.set_index("time")
-            df = clean_dataframe(df)
+        df = pd.DataFrame(candles)
+        df = df.set_index("time")
+        df = clean_dataframe(df)
 
-            if df.empty:
-                continue
-            
-            # Расчет индикаторов с защитой от ошибок
-            df = calculate_indicators(df)
-            
-            # Удаляем NaN в начале (появившиеся из-за window functions типа SMA50)
-            df = df.dropna()
+        if df.empty:
+            print(f"⚠️ {ticker} | {tf_name}: Пустой датафрейм после очистки")
+            continue
+        
+        # Расчет индикаторов с защитой от ошибок
+        df = calculate_indicators(df)
+        
+        # Удаляем NaN в начале (появившиеся из-за window functions типа SMA50)
+        df = df.dropna()
 
-            if not df.empty:
-                file_path = os.path.join(ticker_dir, f"{tf_name}.parquet")
-                df.to_parquet(file_path, compression='snappy')
+        if not df.empty:
+            file_path = os.path.join(ticker_dir, f"{tf_name}.parquet")
+            df.to_parquet(file_path, compression='snappy')
+            print(f"✅ {ticker} | {tf_name} saved")
+        else:
+            print(f"⚠️ {ticker} | {tf_name}: Пустой датафрейм после индикаторов")
 
-async def main():
+def check_missing_files():
+    """Проверка загруженных файлов"""
+    print("\n🔍 Проверка целостности данных...")
+    missing = []
+    
+    for instrument in settings.INSTRUMENTS:
+        ticker = instrument["name"]
+        ticker_dir = os.path.join(DATA_DIR, ticker)
+        
+        for tf_name in TIMEFRAMES.keys():
+            file_path = os.path.join(ticker_dir, f"{tf_name}.parquet")
+            if not os.path.exists(file_path):
+                missing.append(f"{ticker} - {tf_name}")
+    
+    if missing:
+        print(f"❌ Отсутствуют файлы ({len(missing)} шт.):")
+        for m in missing:
+            print(f"  - {m}")
+    else:
+        print("✅ Все файлы успешно загружены!")
+
+def main():
     token = settings.INVEST_TOKEN
     
-    # Снижаем конкаренси до 3, чтобы уменьшить риск блокировки
-    semaphore = asyncio.Semaphore(3)
-
-    async with AsyncClient(token) as client:
-        print(f"🚀 Старт загрузки для {len(settings.INSTRUMENTS)} тикеров (Safe Mode)...")
+    # Синхронный клиент
+    with Client(token) as client:
+        print(f"🚀 Старт загрузки для {len(settings.INSTRUMENTS)} тикеров (Sync Mode)...")
         
-        tasks = []
         for instrument in settings.INSTRUMENTS:
-            task = process_instrument(client, instrument, semaphore)
-            tasks.append(task)
-        
-        await tqdm.gather(*tasks)
+            process_instrument(client, instrument)
         
     print("\n🏁 Загрузка и обработка завершены!")
+    check_missing_files()
+
 
 if __name__ == "__main__":
-    if os.name == 'nt':
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    asyncio.run(main())
+    main()
