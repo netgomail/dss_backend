@@ -141,7 +141,7 @@ class DataCollectorConfig:
     
     # Лимиты и пороговые значения
     min_history_rows: int = 100
-    max_workers: int = 2
+    max_workers: int = 4
     
     # Параметры запросов к API
     request_pause_seconds: float = 1.0
