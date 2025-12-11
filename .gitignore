@@ -1,2 +1,5 @@
 /__pycache__
 /.env
+/data/tickers
+/models
+.DS_Store
