@@ -24,6 +24,7 @@ INSTRUMENTS = [
     { "name": "GMKN", "alias": "Норильский никель", "figi": "BBG004731489", "full_name": "Норильский никель", "class_code": "TQBR" },
     { "name": "HEAD", "alias": "Хэдхантер", "figi": "TCS20A107662", "full_name": "Хэдхантер", "class_code": "TQBR" },
     { "name": "HYDR", "alias": "РусГидро", "figi": "BBG00475K2X9", "full_name": "РусГидро", "class_code": "TQBR" },
+    { "name": "IMOEXF", "alias": "IMOEXF Индекс МосБиржи", "figi": "FUTIMOEXF000", "future": true, "full_name": "IMOEXF Индекс МосБиржи", "class_code": "SPBFUT" },
     { "name": "IRAO", "alias": "Интер РАО ЕЭС", "figi": "BBG004S68473", "full_name": "Интер РАО ЕЭС", "class_code": "TQBR" },
     { "name": "LEAS", "alias": "Европлан", "figi": "TCS00A0ZZFS9", "full_name": "Европлан", "class_code": "TQBR" },
     { "name": "LKOH", "alias": "ЛУКОЙЛ", "figi": "BBG004731032", "full_name": "ЛУКОЙЛ", "class_code": "TQBR" },

@@ -17,6 +17,7 @@ from tinkoff.invest.schemas import InstrumentStatus
 
 # Tickers to fetch metadata for.
 ASSETS = [
+    "IMOEXF",
     "AFKS",
     "AFLT",
     "ALRS",
@@ -86,7 +87,12 @@ ENV_PATH = PROJECT_ROOT / ".env.local"
 
 
 def fetch_shares(client: Client) -> Dict[str, object]:
-    """Fetch all base shares once and index by ticker with class-code priority."""
+    """
+    Fetch all base shares once and index by ticker with class-code priority.
+    
+    Returns:
+        Словарь {ticker: instrument} для акций
+    """
     response = client.instruments.shares(
         instrument_status=InstrumentStatus.INSTRUMENT_STATUS_BASE
     )
@@ -108,27 +114,82 @@ def fetch_shares(client: Client) -> Dict[str, object]:
     return {ticker: select_preferred(shares) for ticker, shares in by_ticker.items()}
 
 
+def fetch_futures(client: Client) -> Dict[str, object]:
+    """
+    Fetch all base futures and index by ticker.
+    
+    Фьючерсы имеют тикеры вида IMOEXF, SiZ4 и т.д.
+    Возвращает только активные (не истёкшие) фьючерсы.
+    
+    Returns:
+        Словарь {ticker: instrument} для фьючерсов
+    """
+    response = client.instruments.futures(
+        instrument_status=InstrumentStatus.INSTRUMENT_STATUS_BASE
+    )
+
+    by_ticker: Dict[str, List[object]] = defaultdict(list)
+    for future in response.instruments:
+        # Используем basic_asset_short_name или ticker
+        by_ticker[future.ticker].append(future)
+
+    # Для фьючерсов с одинаковым тикером выбираем ближайший по дате экспирации
+    def select_nearest(futures: List[object]) -> object:
+        # Сортируем по дате экспирации (ближайший первым)
+        return sorted(futures, key=lambda f: f.expiration_date)[0]
+
+    return {ticker: select_nearest(futures) for ticker, futures in by_ticker.items()}
+
+
 def build_instruments(client: Client) -> Tuple[List[dict], List[str]]:
-    """Prepare instrument dicts for configured assets and track missing tickers."""
+    """
+    Prepare instrument dicts for configured assets and track missing tickers.
+    
+    Ищет инструменты сначала среди акций (shares), затем среди фьючерсов (futures).
+    Это позволяет добавлять как акции (SBER, GAZP), так и фьючерсы (IMOEXF, SiZ4).
+    
+    Returns:
+        Tuple[List[dict], List[str]]: (список инструментов, список ненайденных тикеров)
+    """
+    # Загружаем все доступные акции и фьючерсы
     share_by_ticker = fetch_shares(client)
+    future_by_ticker = fetch_futures(client)
+    
     instruments: List[dict] = []
     missing: List[str] = []
 
     for ticker in ASSETS:
+        # Сначала ищем среди акций
         share = share_by_ticker.get(ticker)
-        if not share:
-            missing.append(ticker)
+        if share:
+            instruments.append(
+                {
+                    "name": share.ticker,
+                    "alias": share.name,
+                    "figi": share.figi,
+                    "full_name": share.name,
+                    "class_code": share.class_code,
+                }
+            )
             continue
-
-        instruments.append(
-            {
-                "name": share.ticker,
-                "alias": share.name,
-                "figi": share.figi,
-                "full_name": share.name,
-                "class_code": share.class_code,
-            }
-        )
+        
+        # Если не нашли среди акций, ищем среди фьючерсов
+        future = future_by_ticker.get(ticker)
+        if future:
+            instruments.append(
+                {
+                    "name": future.ticker,
+                    "alias": future.name,
+                    "figi": future.figi,
+                    "future": True,  # Флаг, что это фьючерс
+                    "full_name": future.name,
+                    "class_code": future.class_code,
+                }
+            )
+            continue
+        
+        # Не нашли ни среди акций, ни среди фьючерсов
+        missing.append(ticker)
 
     return instruments, missing
 
