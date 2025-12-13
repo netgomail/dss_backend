@@ -12,7 +12,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from tinkoff.invest import Client
+from tinkoff.invest import Client, InstrumentIdType
 from tinkoff.invest.schemas import InstrumentStatus
 
 # Tickers to fetch metadata for.
@@ -68,17 +68,23 @@ ASSETS = [
 STATIC_INSTRUMENTS = []
 
 # Prefer MOEX class codes when several instruments share the same ticker.
+# Includes codes for shares, ETFs, bonds, and futures
 PREFERRED_CLASS_CODES = [
-    "TQBR",
-    "TQTF",
-    "TQTD",
-    "TQTE",
-    "TQIF",
-    "TQPI",
-    "TQBD",
-    "EQNE",
-    "SPBXM",
-    "SPBB",
+    # Акции и основные инструменты
+    "TQBR",   # Основной режим торгов акциями
+    "TQTF",   # Режим торгов ETF
+    "TQTD",   # Режим торгов депозитарными расписками
+    "TQTE",   # Режим торгов иностранными ETF
+    "TQIF",   # Режим торгов ПИФами
+    "TQPI",   # Режим торгов паями
+    "TQBD",   # Режим торгов облигациями
+    "EQNE",   # Внесписочный режим
+    "SPBXM",  # Режим SPB Exchange
+    "SPBB",   # Режим SPB Биржи
+
+    # Фьючерсы и производные
+    "SPBFUT", # Фьючерсы на СПБ
+    "SPBDE",  # Опционы на СПБ
 ]
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -86,110 +92,97 @@ SETTINGS_PATH = PROJECT_ROOT / "settings.py"
 ENV_PATH = PROJECT_ROOT / ".env.local"
 
 
-def fetch_shares(client: Client) -> Dict[str, object]:
+def fetch_instrument_by_ticker(client: Client, ticker: str, class_code: str = "") -> object:
     """
-    Fetch all base shares once and index by ticker with class-code priority.
-    
+    Получить полный объект инструмента по тикеру и класс-коду.
+
+    Использует метод get_instrument_by для получения полной информации об инструменте.
+
+    Args:
+        client: Клиент Tinkoff Invest API
+        ticker: Тикер инструмента
+        class_code: Код режима торгов (опционально)
+
     Returns:
-        Словарь {ticker: instrument} для акций
+        Объект Instrument с полной информацией или None, если не найден
     """
-    response = client.instruments.shares(
-        instrument_status=InstrumentStatus.INSTRUMENT_STATUS_BASE
-    )
-
-    by_ticker: Dict[str, List[object]] = defaultdict(list)
-    for share in response.instruments:
-        by_ticker[share.ticker].append(share)
-
-    def select_preferred(shares: List[object]) -> object:
-        def weight(s: object) -> Tuple[int, str]:
-            try:
-                idx = PREFERRED_CLASS_CODES.index(s.class_code)
-            except ValueError:
-                idx = len(PREFERRED_CLASS_CODES)
-            return (idx, s.class_code)
-
-        return sorted(shares, key=weight)[0]
-
-    return {ticker: select_preferred(shares) for ticker, shares in by_ticker.items()}
+    try:
+        response = client.instruments.get_instrument_by(
+            id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_TICKER,
+            id=ticker,
+            class_code=class_code if class_code else None
+        )
+        return response.instrument
+    except Exception as e:
+        # Инструмент не найден с данным class_code
+        return None
 
 
-def fetch_futures(client: Client) -> Dict[str, object]:
+def fetch_instruments(client: Client) -> Dict[str, object]:
     """
-    Fetch all base futures and index by ticker.
-    
-    Фьючерсы имеют тикеры вида IMOEXF, SiZ4 и т.д.
-    Возвращает только активные (не истёкшие) фьючерсы.
-    
+    Получить все доступные инструменты по списку тикеров с полной информацией.
+
+    Для каждого тикера из ASSETS пытается найти инструмент, перебирая
+    приоритетные class_codes. Использует get_instrument_by для получения
+    полной информации о каждом инструменте.
+
     Returns:
-        Словарь {ticker: instrument} для фьючерсов
+        Словарь {ticker: instrument} с полными объектами Instrument
     """
-    response = client.instruments.futures(
-        instrument_status=InstrumentStatus.INSTRUMENT_STATUS_BASE
-    )
+    instruments: Dict[str, object] = {}
 
-    by_ticker: Dict[str, List[object]] = defaultdict(list)
-    for future in response.instruments:
-        # Используем basic_asset_short_name или ticker
-        by_ticker[future.ticker].append(future)
+    for ticker in ASSETS:
+        instrument = None
 
-    # Для фьючерсов с одинаковым тикером выбираем ближайший по дате экспирации
-    def select_nearest(futures: List[object]) -> object:
-        # Сортируем по дате экспирации (ближайший первым)
-        return sorted(futures, key=lambda f: f.expiration_date)[0]
+        # Сначала пробуем получить без указания class_code
+        instrument = fetch_instrument_by_ticker(client, ticker)
 
-    return {ticker: select_nearest(futures) for ticker, futures in by_ticker.items()}
+        # Если не нашли, пробуем с приоритетными class_codes
+        if instrument is None:
+            for class_code in PREFERRED_CLASS_CODES:
+                instrument = fetch_instrument_by_ticker(client, ticker, class_code)
+                if instrument is not None:
+                    break
+
+        if instrument is not None:
+            instruments[ticker] = instrument
+
+    return instruments
 
 
 def build_instruments(client: Client) -> Tuple[List[dict], List[str]]:
     """
     Prepare instrument dicts for configured assets and track missing tickers.
-    
-    Ищет инструменты сначала среди акций (shares), затем среди фьючерсов (futures).
-    Это позволяет добавлять как акции (SBER, GAZP), так и фьючерсы (IMOEXF, SiZ4).
-    
+
+    Использует get_instrument_by для получения полной информации о каждом инструменте.
+    Определяет тип инструмента по полю instrument_type.
+
     Returns:
         Tuple[List[dict], List[str]]: (список инструментов, список ненайденных тикеров)
     """
-    # Загружаем все доступные акции и фьючерсы
-    share_by_ticker = fetch_shares(client)
-    future_by_ticker = fetch_futures(client)
-    
+    # Получаем все инструменты с полной информацией
+    instruments_by_ticker = fetch_instruments(client)
+
     instruments: List[dict] = []
     missing: List[str] = []
 
     for ticker in ASSETS:
-        # Сначала ищем среди акций
-        share = share_by_ticker.get(ticker)
-        if share:
-            instruments.append(
-                {
-                    "name": share.ticker,
-                    "alias": share.name,
-                    "figi": share.figi,
-                    "full_name": share.name,
-                    "class_code": share.class_code,
-                }
-            )
+        instrument = instruments_by_ticker.get(ticker)
+
+        if instrument is None:
+            missing.append(ticker)
             continue
-        
-        # Если не нашли среди акций, ищем среди фьючерсов
-        future = future_by_ticker.get(ticker)
-        if future:
-            instruments.append(
-                {
-                    "name": future.ticker,
-                    "alias": future.name,
-                    "figi": future.figi,
-                    "future": True,  # Флаг, что это фьючерс
-                    "full_name": future.name,
-                    "class_code": future.class_code,
-                }
-            )
-            continue
-        
-        # Не нашли ни среди акций, ни среди фьючерсов
-        missing.append(ticker)
+
+        # Создаем запись на основе полной информации об инструменте
+        instrument_dict = {
+            "ticker": instrument.ticker,
+            "name": getattr(instrument, 'name', ''),
+            "figi": instrument.figi,
+            "class_code": instrument.class_code,
+            "instrument_type": getattr(instrument, 'instrument_type', ''),
+        }
+
+        instruments.append(instrument_dict)
 
     return instruments, missing
 
@@ -214,12 +207,11 @@ def load_env_local(env_path: Path = ENV_PATH) -> None:
 def format_instrument_entry(entry: dict) -> str:
     """Render a single instrument dict to a python-literal string."""
     ordered_keys = [
+        "ticker",
         "name",
-        "alias",
         "figi",
-        "future",
-        "full_name",
         "class_code",
+        "instrument_type",
     ]
     parts = []
     for key in ordered_keys:
@@ -259,7 +251,7 @@ def main() -> None:
     with Client(token) as client:
         generated, missing = build_instruments(client)
 
-    instruments = STATIC_INSTRUMENTS + sorted(generated, key=lambda item: item["name"])
+    instruments = STATIC_INSTRUMENTS + sorted(generated, key=lambda item: item["ticker"])
     update_settings_file(instruments)
 
     print(f"Updated {SETTINGS_PATH.name} with {len(instruments)} instruments.")

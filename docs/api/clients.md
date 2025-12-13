@@ -1,4 +1,0 @@
-
-# Clients
-
-::: tinkoff.invest.clients
