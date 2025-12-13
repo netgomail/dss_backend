@@ -3,3 +3,6 @@
 /data/tickers
 /models
 .DS_Store
+*.md
+/data/README.md
+/scripts/README.md

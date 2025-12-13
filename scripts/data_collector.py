@@ -141,7 +141,7 @@ class DataCollectorConfig:
     
     # Лимиты и пороговые значения
     min_history_rows: int = 100
-    max_workers: int = 4
+    max_workers: int = 2
     
     # Параметры запросов к API
     request_pause_seconds: float = 1.0
@@ -345,7 +345,7 @@ class VolatilityIndicators(BaseIndicatorGroup):
         """
         Рассчитывает индикаторы волатильности.
         
-        Добавляет столбцы: atr, bb_lower, bb_middle, bb_upper, bb_pband.
+        Добавляет столбцы: atr, atr_sma50, bb_lower, bb_middle, bb_upper, bb_pband.
         
         Args:
             df: DataFrame с OHLCV данными
@@ -354,6 +354,9 @@ class VolatilityIndicators(BaseIndicatorGroup):
         
         # ATR - Average True Range (период 14)
         df["atr"] = ta.atr(high, low, close, length=14)
+        
+        # ATR SMA50 — средняя волатильность за 50 периодов (для определения режима)
+        df["atr_sma50"] = ta.sma(df["atr"], length=50)
         
         # Bollinger Bands (период 20, стандартное отклонение 2)
         bb_result = ta.bbands(close, length=20)
@@ -477,19 +480,18 @@ class RegimeIndicators(BaseIndicatorGroup):
         """
         Рассчитывает индикаторы рыночного режима.
         
-        Добавляет столбцы: atr_sma50, regime_vol, adx, regime_trend,
-        regime_liq, market_regime.
+        Добавляет столбцы: regime_vol, adx, regime_trend, regime_liq, market_regime.
         
         Market_regime кодирует состояние: сотни - волатильность,
         десятки - тренд, единицы - ликвидность.
         
         Args:
-            df: DataFrame с OHLCV данными (должен содержать atr, vol_sma20)
+            df: DataFrame с OHLCV данными (должен содержать atr, atr_sma50, vol_sma20)
         """
         high, low, close = df["high"], df["low"], df["close"]
         
         # Режим волатильности: ATR выше своей SMA50 = высокая волатильность
-        df["atr_sma50"] = ta.sma(df["atr"], length=50)
+        # (atr_sma50 рассчитывается в VolatilityIndicators)
         df["regime_vol"] = np.where(df["atr"] > df["atr_sma50"], 1, 0)
         
         # Режим тренда: ADX > 25 = трендовый рынок
