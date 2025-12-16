@@ -2,7 +2,7 @@
 /.env
 /models
 .DS_Store
-*.md
+README.md
 /data/README.md
 /scripts/README.md
 /jupyter/data_collector_demo.ipynb

@@ -40,8 +40,16 @@ def format_datetime(dt) -> str:
     Returns:
         Строка с отформатированной датой
     """
-    # Конвертируем в московское время
-    dt_moscow = dt.tz_convert("Europe/Moscow")
+    # Проверяем, есть ли timezone у данных
+    if dt.tz is None:
+        # Если timezone нет, конвертируем в московское время
+        dt_moscow = dt.tz_localize("UTC").tz_convert("Europe/Moscow")
+    elif str(dt.tz) == "Europe/Moscow":
+        # Если уже в московском времени, используем как есть
+        dt_moscow = dt
+    else:
+        # Если в другом timezone, конвертируем в московское время
+        dt_moscow = dt.tz_convert("Europe/Moscow")
     return dt_moscow.strftime("%Y-%m-%d %H:%M:%S")
 
 
@@ -116,10 +124,10 @@ def display_parquet_data(file_path: str, limit: Optional[int] = None) -> None:
 
             table.add_row(
                 date_str,
-                format_number(row['open'], 2),
-                format_number(row['high'], 2),
-                format_number(row['low'], 2),
-                format_number(row['close'], 2),
+                format_number(row['open'], 3),
+                format_number(row['high'], 3),
+                format_number(row['low'], 3),
+                format_number(row['close'], 3),
                 format_number(row['volume'], 0)
             )
 
