@@ -9,4 +9,4 @@
 .env.local
 /agents
 /scripts/__pycache__
-/data/archive
+/data/

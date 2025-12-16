@@ -1,8 +1,8 @@
 """
-Скрипт для проверки файлов в архиве на соответствие праздничным дням в РФ.
+Скрипт для проверки файлов в архиве на соответствие праздничным дням и выходным в РФ.
 
 Извлекает архив, анализирует даты из имен файлов и выводит список файлов,
-которые попадают на праздничные дни в Российской Федерации.
+которые попадают на праздничные дни или выходные дни (суббота, воскресенье) в Российской Федерации.
 
 Использование:
     python scripts/check_holidays.py [ticker] [year]
@@ -63,13 +63,13 @@ def extract_date_from_filename(filename: str) -> datetime:
 
 def get_holiday_files(archive_path: Path) -> List[Tuple[str, datetime, str]]:
     """
-    Извлекает список файлов из архива, которые попадают на праздничные дни.
+    Извлекает список файлов из архива, которые попадают на праздничные дни или выходные.
     
     Args:
         archive_path: Путь к ZIP архиву
     
     Returns:
-        Список кортежей (имя_файла, дата, название_праздника)
+        Список кортежей (имя_файла, дата, описание_дня)
     """
     if not archive_path.exists():
         raise FileNotFoundError(f"Архив не найден: {archive_path}")
@@ -94,13 +94,35 @@ def get_holiday_files(archive_path: Path) -> List[Tuple[str, datetime, str]]:
                 try:
                     # Извлекаем дату из имени файла
                     file_date = extract_date_from_filename(filename)
+                    file_date_obj = file_date.date()
                     
-                    # Проверяем, является ли дата праздничным днем
-                    is_holiday, holiday_name = cal.is_holiday(file_date)
+                    # Проверяем, является ли дата нерабочим днем (праздник или выходной)
+                    is_working_day = cal.is_working_day(file_date_obj)
                     
-                    if is_holiday:
-                        holiday_files.append((filename, file_date, holiday_name))
-                        logger.debug(f"Найден праздничный день: {filename} -> {file_date.date()} ({holiday_name})")
+                    if not is_working_day:
+                        # Определяем тип нерабочего дня
+                        day_description = None
+                        
+                        # Проверяем, является ли это праздником
+                        is_holiday = cal.is_holiday(file_date_obj)
+                        if is_holiday:
+                            # Получаем название праздника
+                            try:
+                                day_description = cal.get_holiday_label(file_date_obj)
+                            except (AttributeError, ValueError):
+                                day_description = "Праздничный день"
+                        else:
+                            # Это выходной день (суббота или воскресенье)
+                            weekday = file_date_obj.weekday()
+                            if weekday == 5:  # Суббота
+                                day_description = "Суббота (выходной день)"
+                            elif weekday == 6:  # Воскресенье
+                                day_description = "Воскресенье (выходной день)"
+                            else:
+                                day_description = "Выходной день"
+                        
+                        holiday_files.append((filename, file_date, day_description))
+                        logger.debug(f"Найден нерабочий день: {filename} -> {file_date_obj} ({day_description})")
                 
                 except ValueError as e:
                     logger.warning(f"Пропущен файл {filename}: {e}")
@@ -134,16 +156,16 @@ def main() -> None:
         
         # Выводим результаты
         print(f"\n{'='*80}")
-        print(f"Файлы, попадающие на праздничные дни в РФ ({len(holiday_files)} шт.):")
+        print(f"Файлы, попадающие на праздничные дни и выходные в РФ ({len(holiday_files)} шт.):")
         print(f"{'='*80}\n")
         
         # Сортируем по дате
         holiday_files.sort(key=lambda x: x[1])
         
-        for filename, file_date, holiday_name in holiday_files:
+        for filename, file_date, day_description in holiday_files:
             print(f"  {filename}")
             print(f"    Дата: {file_date.strftime('%Y-%m-%d (%A)')}")
-            print(f"    Праздник: {holiday_name}")
+            print(f"    Описание: {day_description}")
             print()
         
         print(f"{'='*80}")
