@@ -7,3 +7,6 @@
 /scripts/README.md
 /jupyter/data_collector_demo.ipynb
 .env.local
+/agents
+/scripts/__pycache__
+/data/archive

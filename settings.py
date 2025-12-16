@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 # токен профиля для Тинькофф Инвестиций
 # инструкция https://tinkoff.github.io/investAPI/token/
 
@@ -7,6 +8,10 @@ INVEST_TOKEN="t.rU2bKskjPpnC4HTXn7gxhPegAKvdKFq5_KuB6zvbDDl37WGIJSKnfx6NWp1T13c5
 
 # режим работы: песочница или реальный счет
 IS_SANDBOX = True
+
+# Параметры для загрузки исторических данных с download_md.py
+MINIMUM_YEAR = 2009
+CURRENT_YEAR = datetime.now().year
 
 # массив анализируемых инструментов, которые содержатся в индексе Московской биржи (IMOEX) generate_instruments.py
 INSTRUMENTS = [

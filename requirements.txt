@@ -44,3 +44,4 @@ tinkoff-investments @ file:///Users/denis/Downloads/tinkoff_investments-0.2.0b11
 tqdm==4.67.1
 typing_extensions==4.15.0
 tzdata==2025.2
+workalendar==24.1.0
