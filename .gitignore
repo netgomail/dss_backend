@@ -2,9 +2,8 @@
 /.env
 /models
 .DS_Store
-README.md
+/README.md
 /data/README.md
-/scripts/README.md
 /jupyter/data_collector_demo.ipynb
 .env.local
 /agents

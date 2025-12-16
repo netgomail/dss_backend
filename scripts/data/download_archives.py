@@ -46,7 +46,7 @@ ARCHIVE_DIR = PROJECT_ROOT / "data" / "archive"
 # Параметры работы
 RATE_LIMIT_DELAY = 5  # секунд при превышении лимита
 MAX_RETRY_ATTEMPTS = 3  # максимум попыток при ошибках
-DOWNLOAD_WORKERS = 2  # количество потоков для скачивания
+DOWNLOAD_WORKERS = 1  # количество потоков для скачивания
 
 
 class TaskStatus(Enum):
